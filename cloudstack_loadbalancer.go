@@ -676,114 +676,124 @@ func rulesMapToString(rules map[*cloudstack.FirewallRule]bool) string {
 //
 // Returns true if the firewall rule was created or updated
 func (lb *loadBalancer) updateFirewallRule(publicIpId string, publicPort int, protocol LoadBalancerProtocol, allowedIPs []string) (bool, error) {
-	if len(allowedIPs) == 0 {
-		allowedIPs = []string{defaultAllowedCIDR}
-	}
-
-	p := lb.Firewall.NewListFirewallRulesParams()
-	p.SetIpaddressid(publicIpId)
-	p.SetListall(true)
-	if lb.projectID != "" {
-		p.SetProjectid(lb.projectID)
-	}
-	klog.V(4).Infof("Listing firewall rules for %v", p)
-	r, err := lb.Firewall.ListFirewallRules(p)
-	if err != nil {
-		return false, fmt.Errorf("error fetching firewall rules for public IP %v: %v", publicIpId, err)
-	}
-	klog.V(4).Infof("All firewall rules for %v: %v", lb.ipAddr, rulesToString(r.FirewallRules))
-
-	// find all rules that have a matching proto+port
-	// a map may or may not be faster, but is a bit easier to understand
-	filtered := make(map[*cloudstack.FirewallRule]bool)
-	for _, rule := range r.FirewallRules {
-		if rule.Protocol == protocol.IPProtocol() && rule.Startport == publicPort && rule.Endport == publicPort {
-			filtered[rule] = true
-		} else {
-		}
-	}
-	klog.V(4).Infof("Matching rules for %v: %v", lb.ipAddr, rulesMapToString(filtered))
-
-	// determine if we already have a rule with matching cidrs
-	var match *cloudstack.FirewallRule
-	for rule := range filtered {
-		cidrlist := strings.Split(rule.Cidrlist, ",")
-		if compareStringSlice(cidrlist, allowedIPs) {
-			klog.V(4).Infof("Found identical rule: %v", rule)
-			match = rule
-			break
-		}
-	}
-
-	if match != nil {
-		// no need to create a new rule - but prevent deletion of the matching rule
-		delete(filtered, match)
-	}
-
-	// delete all other rules that didn't match the CIDR list
-	// do this first to prevent CS rule conflict errors
-	klog.V(4).Infof("Firewall rules to be deleted for %v: %v", lb.ipAddr, rulesMapToString(filtered))
-	for rule := range filtered {
-		p := lb.Firewall.NewDeleteFirewallRuleParams(rule.Id)
-		_, err = lb.Firewall.DeleteFirewallRule(p)
-		if err != nil {
-			// report the error, but keep on deleting the other rules
-			klog.Errorf("Error deleting old firewall rule %v: %v", rule.Id, err)
-		}
-	}
-
-	// create new rule if necessary
-	if match == nil {
-		// no rule found, create a new one
-		p := lb.Firewall.NewCreateFirewallRuleParams(publicIpId, protocol.IPProtocol())
-		p.SetCidrlist(allowedIPs)
-		p.SetStartport(publicPort)
-		p.SetEndport(publicPort)
-		_, err = lb.Firewall.CreateFirewallRule(p)
-		if err != nil {
-			// return immediately if we can't create the new rule
-			return false, fmt.Errorf("error creating new firewall rule for public IP %v, proto %v, port %v, allowed %v: %v", publicIpId, protocol, publicPort, allowedIPs, err)
-		}
-	}
-
 	// return true (because we changed something), but also the last error if deleting one old rule failed
-	return true, err
+	return true, nil
 }
+// func (lb *loadBalancer) updateFirewallRule(publicIpId string, publicPort int, protocol LoadBalancerProtocol, allowedIPs []string) (bool, error) {
+// 	if len(allowedIPs) == 0 {
+// 		allowedIPs = []string{defaultAllowedCIDR}
+// 	}
+
+// 	p := lb.Firewall.NewListFirewallRulesParams()
+// 	p.SetIpaddressid(publicIpId)
+// 	p.SetListall(true)
+// 	if lb.projectID != "" {
+// 		p.SetProjectid(lb.projectID)
+// 	}
+// 	klog.V(4).Infof("Listing firewall rules for %v", p)
+// 	r, err := lb.Firewall.ListFirewallRules(p)
+// 	if err != nil {
+// 		return false, fmt.Errorf("error fetching firewall rules for public IP %v: %v", publicIpId, err)
+// 	}
+// 	klog.V(4).Infof("All firewall rules for %v: %v", lb.ipAddr, rulesToString(r.FirewallRules))
+
+// 	// find all rules that have a matching proto+port
+// 	// a map may or may not be faster, but is a bit easier to understand
+// 	filtered := make(map[*cloudstack.FirewallRule]bool)
+// 	for _, rule := range r.FirewallRules {
+// 		if rule.Protocol == protocol.IPProtocol() && rule.Startport == publicPort && rule.Endport == publicPort {
+// 			filtered[rule] = true
+// 		} else {
+// 		}
+// 	}
+// 	klog.V(4).Infof("Matching rules for %v: %v", lb.ipAddr, rulesMapToString(filtered))
+
+// 	// determine if we already have a rule with matching cidrs
+// 	var match *cloudstack.FirewallRule
+// 	for rule := range filtered {
+// 		cidrlist := strings.Split(rule.Cidrlist, ",")
+// 		if compareStringSlice(cidrlist, allowedIPs) {
+// 			klog.V(4).Infof("Found identical rule: %v", rule)
+// 			match = rule
+// 			break
+// 		}
+// 	}
+
+// 	if match != nil {
+// 		// no need to create a new rule - but prevent deletion of the matching rule
+// 		delete(filtered, match)
+// 	}
+
+// 	// delete all other rules that didn't match the CIDR list
+// 	// do this first to prevent CS rule conflict errors
+// 	klog.V(4).Infof("Firewall rules to be deleted for %v: %v", lb.ipAddr, rulesMapToString(filtered))
+// 	for rule := range filtered {
+// 		p := lb.Firewall.NewDeleteFirewallRuleParams(rule.Id)
+// 		_, err = lb.Firewall.DeleteFirewallRule(p)
+// 		if err != nil {
+// 			// report the error, but keep on deleting the other rules
+// 			klog.Errorf("Error deleting old firewall rule %v: %v", rule.Id, err)
+// 		}
+// 	}
+
+// 	// create new rule if necessary
+// 	if match == nil {
+// 		// no rule found, create a new one
+// 		p := lb.Firewall.NewCreateFirewallRuleParams(publicIpId, protocol.IPProtocol())
+// 		p.SetCidrlist(allowedIPs)
+// 		p.SetStartport(publicPort)
+// 		p.SetEndport(publicPort)
+// 		_, err = lb.Firewall.CreateFirewallRule(p)
+// 		if err != nil {
+// 			// return immediately if we can't create the new rule
+// 			return false, fmt.Errorf("error creating new firewall rule for public IP %v, proto %v, port %v, allowed %v: %v", publicIpId, protocol, publicPort, allowedIPs, err)
+// 		}
+// 	}
+
+// 	// return true (because we changed something), but also the last error if deleting one old rule failed
+// 	return true, err
+// }
 
 // deleteFirewallRule deletes the firewall rule associated with the ip:port:protocol combo
 //
 // returns true when corresponding rules were deleted
 func (lb *loadBalancer) deleteFirewallRule(publicIpId string, publicPort int, protocol LoadBalancerProtocol) (bool, error) {
-	p := lb.Firewall.NewListFirewallRulesParams()
-	p.SetIpaddressid(publicIpId)
-	p.SetListall(true)
-	if lb.projectID != "" {
-		p.SetProjectid(lb.projectID)
-	}
-	r, err := lb.Firewall.ListFirewallRules(p)
-	if err != nil {
-		return false, fmt.Errorf("error fetching firewall rules for public IP %v: %v", publicIpId, err)
-	}
-
-	// filter by proto:port
-	filtered := make([]*cloudstack.FirewallRule, 0, 1)
-	for _, rule := range r.FirewallRules {
-		if rule.Protocol == protocol.IPProtocol() && rule.Startport == publicPort && rule.Endport == publicPort {
-			filtered = append(filtered, rule)
-		}
-	}
-
 	// delete all rules
-	deleted := false
-	for _, rule := range filtered {
-		p := lb.Firewall.NewDeleteFirewallRuleParams(rule.Id)
-		_, err = lb.Firewall.DeleteFirewallRule(p)
-		if err != nil {
-			klog.Errorf("Error deleting old firewall rule %v: %v", rule.Id, err)
-		} else {
-			deleted = true
-		}
-	}
-
-	return deleted, err
+	deleted := true
+	return deleted, nil
 }
+
+// func (lb *loadBalancer) deleteFirewallRule(publicIpId string, publicPort int, protocol LoadBalancerProtocol) (bool, error) {
+// 	p := lb.Firewall.NewListFirewallRulesParams()
+// 	p.SetIpaddressid(publicIpId)
+// 	p.SetListall(true)
+// 	if lb.projectID != "" {
+// 		p.SetProjectid(lb.projectID)
+// 	}
+// 	r, err := lb.Firewall.ListFirewallRules(p)
+// 	if err != nil {
+// 		return false, fmt.Errorf("error fetching firewall rules for public IP %v: %v", publicIpId, err)
+// 	}
+
+// 	// filter by proto:port
+// 	filtered := make([]*cloudstack.FirewallRule, 0, 1)
+// 	for _, rule := range r.FirewallRules {
+// 		if rule.Protocol == protocol.IPProtocol() && rule.Startport == publicPort && rule.Endport == publicPort {
+// 			filtered = append(filtered, rule)
+// 		}
+// 	}
+
+// 	// delete all rules
+// 	deleted := false
+// 	for _, rule := range filtered {
+// 		p := lb.Firewall.NewDeleteFirewallRuleParams(rule.Id)
+// 		_, err = lb.Firewall.DeleteFirewallRule(p)
+// 		if err != nil {
+// 			klog.Errorf("Error deleting old firewall rule %v: %v", rule.Id, err)
+// 		} else {
+// 			deleted = true
+// 		}
+// 	}
+
+// 	return deleted, err
+// }
